@@ -12,16 +12,23 @@ class PtDiff
   end
 
   def compare(string)
-    @tagger_config.each_key do |tagger|
+    @tagger_config.each do |tagger, config|
       command = "echo #{string} | "
-      if @tagger_config[tagger][:encoding] != "utf-8"
-        command += "iconv -t #{@tagger_config[tagger][:encoding]} -f utf-8 | "
+      if config[:encoding] != "utf-8"
+        command += "iconv -t #{config[:encoding]} -f utf-8 | "
       end
-      command += @tagger_config[tagger][:command]}
+      command += config[:command]
       result = `#{command}`
-      if @tagger_config[tagger][:encoding] != "utf-8"
-        result = Iconv.conv("utf-8", @tagger_config[tagger][:encoding], result)
+      if config[:encoding] != "utf-8"
+        result = Iconv.conv("utf-8", config[:encoding], result)
       end
+      regexp = Regexp.new(config[:pattern], nil, "u")
+      mophemes = result.scan(regexp)
+      @result[tagger] = mophemes
     end
+  end
+
+  def show
+    puts YAML.unescape(YAML.dump(@result))
   end
 end

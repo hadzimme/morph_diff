@@ -1,5 +1,5 @@
 ---
-:pos_tagger:
+:tagger_config:
   :juman_normal:
     :command: juman
     :grammar: juman
