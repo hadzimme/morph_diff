@@ -45,13 +45,14 @@ class MorphDiff
         @characters[index].input(result)
       end
     end
-    token = MorphDiff::Token.new
+    token = MorphDiff::Token.new(@grammar_config)
     @characters.each do |character|
-      results = character.results_chunked
-      token.input(results)
+      character.results_chunked.each do |result|
+        token.input(result)
+      end
       if character.all_chunked?
         token.dump
-        token = MorphDiff::Token.new
+        token = MorphDiff::Token.new(@grammar_config)
       end
     end
     nil
@@ -81,21 +82,26 @@ class MorphDiff::Character
 end
 
 class MorphDiff::Token
-  def initialize
+  def initialize(config)
+    @config = config
     @result = Hash.new
   end
 
-  def input(results)
-    results.each do |result|
-      if @result.keys.include?(result[:tagger])
-        @result[result[:tagger]].push(result)
-      else
-        @result[result[:tagger]] = Array.new.push(result)
-      end
+  def input(result)
+    if @result.keys.include?(result[:tagger])
+      @result[result[:tagger]].push(result)
+    else
+      @result[result[:tagger]] = Array.new.push(result)
     end
   end
 
   def dump
+    taggers = @result.keys
+    (taggers.size - 1).times do
+      tagger01 = taggers.shift
+      taggers.each do |tagger02|
+      end
+    end
     @result.each do |tagger, results|
       puts "[#{tagger.to_s}]"
       results.each do |result|
