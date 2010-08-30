@@ -12,7 +12,7 @@ class MorphDiff
   end
 
   def compare(string)
-    @characters = string.split(//u).map{|character| Character.new(character)}
+    @characters = Array.new(string.split(//u).size){|i| Character.new}
     @tagger_config.each do |tagger, config|
       if config[:encoding] == "utf-8"
         result = %x{echo #{string} | #{config[:command]}}
@@ -45,40 +45,23 @@ class MorphDiff
         @characters[index].input(result)
       end
     end
-    cursor = Hash.new
+    token = MorphDiff::Token.new
     @characters.each do |character|
-      character.results_chunked.each do |result|
-        if cursor.keys.include?(result[:tagger])
-          cursor[result[:tagger]].push(result)
-        else
-          cursor[result[:tagger]] = Array.new.push(result)
-        end
-      end
+      results = character.results_chunked
+      token.input(results)
       if character.all_chunked?
-        cursor.each do |tagger, results|
-          puts tagger.to_s
-          results.each do |result|
-            puts "#{result[:surface]}\t#{result[:feature]}"
-          end
-        end
-        puts "chunked ======================================"
-        cursor = Hash.new
+        token.dump
+        token = MorphDiff::Token.new
       end
     end
     nil
   end
-
-  def show
-    puts YAML.unescape(YAML.dump(@result))
-  end
 end
 
 class MorphDiff::Character
-  def initialize(character)
-    @character = character
+  def initialize
     @results = Array.new
   end
-  attr_reader :character, :surface, :feature, :chunked
 
   def input(result)
     @results.push(result)
@@ -94,5 +77,31 @@ class MorphDiff::Character
     else
       false
     end
+  end
+end
+
+class MorphDiff::Token
+  def initialize
+    @result = Hash.new
+  end
+
+  def input(results)
+    results.each do |result|
+      if @result.keys.include?(result[:tagger])
+        @result[result[:tagger]].push(result)
+      else
+        @result[result[:tagger]] = Array.new.push(result)
+      end
+    end
+  end
+
+  def dump
+    @result.each do |tagger, results|
+      puts "[#{tagger.to_s}]"
+      results.each do |result|
+        puts "#{result[:surface]}\t#{result[:feature]}"
+      end
+    end
+    puts "=== chunked ======================================"
   end
 end
