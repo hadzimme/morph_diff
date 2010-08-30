@@ -34,6 +34,7 @@ class MorphDiff
             end
           results.push({
             :tagger => tagger,
+            :grammar => @tagger_config[tagger][:grammar],
             :surface => morpheme[0],
             :feature => feature,
             :chunked => false,
@@ -45,14 +46,14 @@ class MorphDiff
         @characters[index].input(result)
       end
     end
-    token = MorphDiff::Token.new(@grammar_config)
+    token = MorphDiff::Token.new(@grammar_configs)
     @characters.each do |character|
       character.results_chunked.each do |result|
         token.input(result)
       end
       if character.all_chunked?
         token.dump
-        token = MorphDiff::Token.new(@grammar_config)
+        token.clear
       end
     end
     nil
@@ -82,9 +83,23 @@ class MorphDiff::Character
 end
 
 class MorphDiff::Token
-  def initialize(config)
-    @config = config
+  def initialize(configs)
+    @configs = Array.new
+    configs.each do |config|
+      @configs.push({
+        :combination => config[:combination],
+        :pattern => YAML.load_file(config[:config]),
+      })
+    end
     @result = Hash.new
+    @dump_map = Hash.new
+    @dump_results = Array.new
+  end
+
+  def clear
+    @result = Hash.new
+    @dump_map = Hash.new
+    @dump_results = Array.new
   end
 
   def input(result)
@@ -96,18 +111,61 @@ class MorphDiff::Token
   end
 
   def dump
-    taggers = @result.keys
-    (taggers.size - 1).times do
-      tagger01 = taggers.shift
-      taggers.each do |tagger02|
+    check_pos
+    @dump_results.each do |taggers|
+      taggers.each do |tagger|
+        puts "[#{tagger.to_s}]"
       end
-    end
-    @result.each do |tagger, results|
-      puts "[#{tagger.to_s}]"
-      results.each do |result|
+      @result[taggers.first].each do |result|
         puts "#{result[:surface]}\t#{result[:feature]}"
       end
     end
     puts "=== chunked ======================================"
+  end
+
+  def check_pos
+    taggers = @result.keys
+    taggers.each_with_index do |tagger, index|
+      @dump_map[tagger] = index
+    end
+    @dump_results = taggers.map{|tagger| Array.new.push(tagger)}
+    repetation = taggers.size - 1
+    repetation.times do
+      tagger01 = taggers.shift
+      taggers.each do |tagger02|
+        combination = [tagger01, tagger02].map{|tagger| @result[tagger].first[:grammar]}
+        if combination.uniq.size == 1
+          feature01 = @result[tagger01].map{|result| result[:feature]}.join("/")
+          feature02 = @result[tagger02].map{|result| result[:feature]}.join("/")
+          if feature01 == feature02 && @dump_map[tagger01] != @dump_map[tagger02]
+            @dump_results[@dump_map[tagger01]].concat(@dump_results[@dump_map[tagger02]])
+            @dump_results.delete_at(@dump_map[tagger02])
+            @dump_results.each_with_index do |results, index|
+              results.each do |result|
+                @dump_map[result] = index
+              end
+            end
+          end
+        else
+          @configs.each do |config|
+            if config[:combination] == combination || config[:combination] == combination.reverse!
+              feature01 = @result[combination[0]].map{|result| result[:feature]}.join("/")
+              feature02 = @result[combination[1]].map{|result| result[:feature]}.join("/")
+              if config[:pattern][feature01].include?(feature02) && @dump_map[tagger01] != @dump_map[tagger02]
+                @dump_results[@dump_map[tagger01]].concat(@dump_result[@dump_map[tagger02]])
+                @dump_results.delete_at(@dump_map[tagger02])
+                @dump_results.each_with_index do |results, index|
+                  results.each do |result|
+                    @dump_map[result] = index
+                  end
+                end
+              end
+            else
+              next
+            end
+          end
+        end
+      end
+    end
   end
 end

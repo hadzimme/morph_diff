@@ -24,4 +24,16 @@
     :pattern: "^([^\t]+)\t([^,]+),([^,]+).+?\n"
     :encoding: utf-8
     :description: MeCab with IPA Dictionary
-:grammar_configs: :hoge
+:grammar_configs:
+- :combination:
+  - juman
+  - unidic
+  :config: grammar/juman_unidic.yml
+- :combination:
+  - juman
+  - ipadic
+  :config: grammar/juman_ipadic.yml
+- :combination:
+  - unidic
+  - ipadic
+  :config: grammar/unidic_ipadic.yml
