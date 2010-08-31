@@ -148,11 +148,23 @@ class MorphDiff::Token
           end
         else
           @configs.each do |config|
-            if config[:combination] == combination || config[:combination] == combination.reverse!
-              feature01 = @result[combination[0]].map{|result| result[:feature]}.join("/")
-              feature02 = @result[combination[1]].map{|result| result[:feature]}.join("/")
-              if config[:pattern][feature01].include?(feature02) && @dump_map[tagger01] != @dump_map[tagger02]
-                @dump_results[@dump_map[tagger01]].concat(@dump_result[@dump_map[tagger02]])
+            if config[:combination] == combination
+              feature01 = @result[tagger01].map{|result| result[:feature]}.join("/")
+              feature02 = @result[tagger02].map{|result| result[:feature]}.join("/")
+              if config[:pattern].keys.include?(feature01) && config[:pattern][feature01].include?(feature02) && @dump_map[tagger01] != @dump_map[tagger02]
+                @dump_results[@dump_map[tagger01]].concat(@dump_results[@dump_map[tagger02]])
+                @dump_results.delete_at(@dump_map[tagger02])
+                @dump_results.each_with_index do |results, index|
+                  results.each do |result|
+                    @dump_map[result] = index
+                  end
+                end
+              end
+            elsif config[:combination] == combination.reverse
+              feature01 = @result[tagger02].map{|result| result[:feature]}.join("/")
+              feature02 = @result[tagger01].map{|result| result[:feature]}.join("/")
+              if config[:pattern].keys.include?(feature01) && config[:pattern][feature01].include?(feature02) && @dump_map[tagger01] != @dump_map[tagger02]
+                @dump_results[@dump_map[tagger01]].concat(@dump_results[@dump_map[tagger02]])
                 @dump_results.delete_at(@dump_map[tagger02])
                 @dump_results.each_with_index do |results, index|
                   results.each do |result|

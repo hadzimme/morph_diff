@@ -13,27 +13,27 @@
     :encoding: euc-jp
     :description: JUMAN with default dictionary and autodic
   :mecab_unidic:
-    :command: mecab -d $HOME/usr/lib/mecab/dic/unidic
+    :command: mecab -d /usr/lib/mecab/dic/unidic
     :grammar: :unidic
     :pattern: "^([^\t]+)\t([^,]+),([^,]+).+?\n"
     :encoding: utf-8
     :description: MeCab with UniDic
   :mecab_ipadic:
-    :command: mecab -d $HOME/usr/lib/mecab/dic/ipadic
+    :command: mecab -d /usr/lib/mecab/dic/ipadic
     :grammar: :ipadic
     :pattern: "^([^\t]+)\t([^,]+),([^,]+).+?\n"
     :encoding: utf-8
     :description: MeCab with IPA Dictionary
 :grammar_configs:
 - :combination:
-  - juman
-  - unidic
+  - :juman
+  - :unidic
   :config: grammar/juman_unidic.yml
 - :combination:
-  - juman
-  - ipadic
+  - :juman
+  - :ipadic
   :config: grammar/juman_ipadic.yml
 - :combination:
-  - unidic
-  - ipadic
+  - :unidic
+  - :ipadic
   :config: grammar/unidic_ipadic.yml
