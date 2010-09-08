@@ -22,9 +22,9 @@ class MorphDiff
         result = Iconv.conv("utf-8", config[:encoding], result)
       end
       regexp = Regexp.new(config[:pattern], nil, "u")
-      mophemes = result.scan(regexp)
+      morphemes = result.scan(regexp)
       results = Array.new
-      mophemes.each do |morpheme|
+      morphemes.each do |morpheme|
         morpheme[0].split(//u).size.times do
           feature =
             if morpheme[2] == "*"
@@ -91,15 +91,7 @@ class MorphDiff::Token
         :pattern => YAML.load_file(config[:config]),
       })
     end
-    @result = Hash.new
-    @dump_map = Hash.new
-    @dump_results = Array.new
-  end
-
-  def clear
-    @result = Hash.new
-    @dump_map = Hash.new
-    @dump_results = Array.new
+    clear
   end
 
   def input(result)
@@ -123,14 +115,20 @@ class MorphDiff::Token
     puts "=== chunked ======================================"
   end
 
+  def clear
+    @result = Hash.new
+    @dump_map = Hash.new
+    @dump_results = Array.new
+  end
+
+  private
   def check_pos
     taggers = @result.keys
     taggers.each_with_index do |tagger, index|
       @dump_map[tagger] = index
     end
     @dump_results = taggers.map{|tagger| Array.new.push(tagger)}
-    repetation = taggers.size - 1
-    repetation.times do
+    (taggers.size - 1).times do
       tagger01 = taggers.shift
       taggers.each do |tagger02|
         combination = [tagger01, tagger02].map{|tagger| @result[tagger].first[:grammar]}

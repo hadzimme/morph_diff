@@ -1,13 +1,13 @@
 ---
 :tagger_config:
   :juman_normal:
-    :command: juman
+    :command: juman -e2
     :grammar: :juman
     :pattern: "^([^@ ][^ ]*) [^ ]+ [^ ]+ ([^ ]+) [^ ]+ ([^ ]+).+?\n"
     :encoding: euc-jp
     :description: JUMAN with default dictionary
   :juman_autodic:
-    :command: juman -r $HOME/.jumanautorc
+    :command: juman -e2 -r $HOME/.jumanautorc
     :grammar: :juman
     :pattern: "^([^@ ][^ ]*) [^ ]+ [^ ]+ ([^ ]+) [^ ]+ ([^ ]+).+?\n"
     :encoding: euc-jp
