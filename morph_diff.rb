@@ -1,31 +1,47 @@
+# -*- coding: utf-8 -*-
+
 require "iconv"
 require "yaml"
 require "yaml/encoding"
-require "string_is_not_binary"
+
+class String
+  def is_binary_data?
+    false
+  end
+end
 
 class MorphDiff
   def initialize
     config = YAML.load_file("config/main.yml")
-    @tagger_config = config[:tagger_config]
     @grammar_configs = config[:grammar_configs]
-    @characters = nil
+    @multi_tagger = MultiTagger.new(config[:tagger_config])
+    @tokens = nil
   end
 
   def compare(string)
-    @characters = Array.new(string.split(//u).size){|i| Character.new}
-    @tagger_config.each do |tagger, config|
-      if config[:encoding] == "utf-8"
-        result = %x{echo #{string} | #{config[:command]}}
-      else
-        strcnv = Iconv.conv(config[:encoding], "utf-8", string)
-        result = %x{echo #{strcnv} | #{config[:command]}}
-        result = Iconv.conv("utf-8", config[:encoding], result)
-      end
+    @tokens = @multi_tagger.parse(string)
+  end
+
+  def dump
+    @tokens.each do |token|
+      token.dump
+    end
+  end
+
+  def save
+  end
+
+  def hogehoge
+    @characters = Array.new(string.size){|i| Character.new}
+    tagger_result = @multi_tagger.parse(string)
+
+    tagger_result.each do |tagger, result|
       regexp = Regexp.new(config[:pattern], nil, "u")
       morphemes = result.scan(regexp)
       results = Array.new
+
       morphemes.each do |morpheme|
-        morpheme[0].split(//u).size.times do
+        morpheme.surface.size.times do
           feature =
             if morpheme[2] == "*"
               morpheme[1]
@@ -46,7 +62,11 @@ class MorphDiff
         @characters[index].input(result)
       end
     end
+
     token = MorphDiff::Token.new(@grammar_configs)
+
+    characters = matrix.transpose.map{|character_set| Character.new(character_set)}
+
     @characters.each do |character|
       character.results_chunked.each do |result|
         token.input(result)
@@ -56,34 +76,75 @@ class MorphDiff
         token.clear
       end
     end
-    nil
+
+    return nil
   end
 end
 
-class MorphDiff::Character
+class MorphDiff::MultiTagger
   def initialize
-    @results = Array.new
+    tagger_config = Hash.new ###############
+    @taggers = tagger_config.map{|tagger_name, config| Tagger.new(tagger_name, config[:grammar], config[:option]}
   end
 
-  def input(result)
-    @results.push(result)
-  end
-
-  def results_chunked
-    @results.select{|result| result[:chunked]}
-  end
-
-  def all_chunked?
-    if @results.map{|result| result[:chunked]}.inject{|result, value| result && value}
-      true
-    else
-      false
+  def parse(string)
+    matrix = @taggers.map do |tagger|
+      result = tagger.parse(string)
+      regexp = Regexp.new(config[:pattern])
+      morphemes = result.scan(regexp)
+      characters = morphemes.map do |morpheme|
+        morpheme[0].split(//).map{|character| Character.new(*morpheme[1..-1])}
+      end
+      characters.flatten
     end
+    matrix.transpose.map{|character_set| Token.new(character_set)}
   end
 end
 
-class MorphDiff::Token
-  def initialize(configs)
+class MorphDiff::MultiTagger::Tagger
+  def initialize(tagger_name, grammar, option = "")
+    @tagger =
+      case grammar
+      when :mecab
+        MeCab.new(option)
+      when :juman
+        JUMAN.new(option)
+      else
+        raise NotSupportedTaggerError.new("not supported tagger")
+      end
+  end
+
+  def parse(string)
+    @tagger.parse(string)
+  end
+end
+
+class MorphDiff::MultiTagger::Tagger::MeCab
+  def initialize(option)
+    require "MeCab"
+    @tagger = MeCab::Tagger.new(option)
+  end
+
+  def parse(string)
+    @tagger.parse(string)
+  end
+end
+
+class MorphDiff::MultiTagger::Tagger::JUMAN
+  def initialize(option)
+    @option = option
+  end
+
+  def parse(string)
+    string = Iconv.conv("euc-jp", "utf-8", string)
+    result = %x{echo #{string} | juman #{@option}}
+    Iconv.conv("utf-8", "euc-jp", result)
+  end
+end
+
+class MorphDiff::MultiTagger::Token
+  def initialize(character_set)
+    @character_set = character_set
     @configs = Array.new
     configs.each do |config|
       @configs.push({
@@ -176,6 +237,28 @@ class MorphDiff::Token
           end
         end
       end
+    end
+  end
+end
+
+class MorphDiff::Character
+  def initialize
+    @results = Array.new
+  end
+
+  def input(result)
+    @results.push(result)
+  end
+
+  def results_chunked
+    @results.select{|result| result[:chunked]}
+  end
+
+  def all_chunked?
+    if @results.map{|result| result[:chunked]}.inject{|result, value| result && value}
+      return true
+    else
+      return false
     end
   end
 end
