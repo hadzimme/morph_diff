@@ -12,10 +12,7 @@ end
 
 class MorphDiff
   def initialize
-    config = YAML.load_file("config/main.yml")
-    @grammar_configs = config[:grammar_configs]
-    @multi_tagger = MultiTagger.new(config[:tagger_config])
-    @tokens = nil
+    @multi_tagger = MultiTagger.new
   end
 
   def compare(string)
@@ -23,88 +20,48 @@ class MorphDiff
   end
 
   def dump
+    output_text = "RESULT >> ========================================\n\n"
     @tokens.each do |token|
-      token.dump
+      output_text += token.dump_data
+      output_text += "=== chunked ======================================\n\n"
     end
-  end
-
-  def save
-  end
-
-  def hogehoge
-    @characters = Array.new(string.size){|i| Character.new}
-    tagger_result = @multi_tagger.parse(string)
-
-    tagger_result.each do |tagger, result|
-      regexp = Regexp.new(config[:pattern], nil, "u")
-      morphemes = result.scan(regexp)
-      results = Array.new
-
-      morphemes.each do |morpheme|
-        morpheme.surface.size.times do
-          feature =
-            if morpheme[2] == "*"
-              morpheme[1]
-            else
-              morpheme[1..2].join("_")
-            end
-          results.push({
-            :tagger => tagger,
-            :grammar => @tagger_config[tagger][:grammar],
-            :surface => morpheme[0],
-            :feature => feature,
-            :chunked => false,
-          })
-        end
-        results.last[:chunked] = true
-      end
-      results.each_with_index do |result, index|
-        @characters[index].input(result)
-      end
-    end
-
-    token = MorphDiff::Token.new(@grammar_configs)
-
-    characters = matrix.transpose.map{|character_set| Character.new(character_set)}
-
-    @characters.each do |character|
-      character.results_chunked.each do |result|
-        token.input(result)
-      end
-      if character.all_chunked?
-        token.dump
-        token.clear
-      end
-    end
-
-    return nil
   end
 end
 
 class MorphDiff::MultiTagger
   def initialize
-    tagger_config = Hash.new ###############
-    @taggers = tagger_config.map{|tagger_name, config| Tagger.new(tagger_name, config[:grammar], config[:option]}
+    main_configuration = YAML.load_file("config/main.yml")
+    tagger_configuration = main_configuration[:tagger_configuration]
+    @taggers = tagger_configuration.map{|name, configuration| Tagger.new(name, configuration)}
+    Token.preset_grammar(main_configuration[:grammar_pairs])
   end
 
   def parse(string)
-    matrix = @taggers.map do |tagger|
-      result = tagger.parse(string)
-      regexp = Regexp.new(config[:pattern])
-      morphemes = result.scan(regexp)
-      characters = morphemes.map do |morpheme|
-        morpheme[0].split(//).map{|character| Character.new(*morpheme[1..-1])}
+    character_matrix =
+      @taggers.map do |tagger|
+        result = tagger.parse(string)
+        morphemes = result.scan(/#{tagger.pattern}/)
+        characters = morphemes.map do |morpheme|
+          sub_characters = morpheme[0].split(//).map do |character|
+            Character.new(tagger.name, tagger.grammar, *morpheme)
+          end
+          sub_characters.last.mark_as_chunk
+          sub_characters
+        end
+        characters.flatten
       end
-      characters.flatten
-    end
-    matrix.transpose.map{|character_set| Token.new(character_set)}
+    Token.tokenize(character_matrix.transpose)
   end
 end
 
 class MorphDiff::MultiTagger::Tagger
-  def initialize(tagger_name, grammar, option = "")
+  def initialize(name, configuration)
+    @name = name
+    @grammar = configuration[:grammar]
+    @pattern = configuration[:pattern]
+    option = configuration[:option] || ""
     @tagger =
-      case grammar
+      case tagger
       when :mecab
         MeCab.new(option)
       when :juman
@@ -113,6 +70,7 @@ class MorphDiff::MultiTagger::Tagger
         raise NotSupportedTaggerError.new("not supported tagger")
       end
   end
+  attr_reader :name, :grammar, :pattern
 
   def parse(string)
     @tagger.parse(string)
@@ -142,123 +100,150 @@ class MorphDiff::MultiTagger::Tagger::JUMAN
   end
 end
 
+class MorphDiff::MultiTagger::Character
+  def initialize(tagger_name, grammar, surface, feature01, feature02)
+    @tagger_name = tagger_name
+    @grammar = grammar
+    @surface = surface
+    @feature =
+      if feature02 == "*"
+        feature01
+      else
+        "#{feature01}_#{feature02}"
+      end
+    @chunked = false
+  end
+  attr_reader :tagger_name, :grammar, :surface, :feature
+
+  def mark_as_chunked
+    @chunked = true
+  end
+
+  def chunked?
+    @chunked
+  end
+end
+
 class MorphDiff::MultiTagger::Token
-  def initialize(character_set)
-    @character_set = character_set
-    @configs = Array.new
-    configs.each do |config|
-      @configs.push({
-        :combination => config[:combination],
-        :pattern => YAML.load_file(config[:config]),
-      })
+  def self.preset_grammar(grammar_combinations)
+    @@tagger_pairs = Array.new
+    @@tagger_rule_set = Hash.new
+    grammar_combinations.each do |grammar|
+      @@tagger_pairs.push(grammar[:combination])
+      rule = YAML.load_file(grammar[:config])
+      @@tagger_rule_set[grammar[:combination].join("_").intern] = rule
     end
-    clear
   end
 
-  def input(result)
-    if @result.keys.include?(result[:tagger])
-      @result[result[:tagger]].push(result)
+  def self.tokenize(characters)
+    tokens = Array.new.push(self.new)
+    characters.select{|character| character.chunked?}.each do |character|
+      tokens.last.input(character)
+    end
+    if all_chunked?(characters)
+      tokens.last.check_pos
+      tokens.push(self.new)
+    end
+  end
+
+  def initialize
+    @tagger_morpheme_set = Hash.new
+    @tagger_sets = Array.new
+  end
+
+  def input(character)
+    morpheme = Morpheme.new(character.surface, character.feature)
+    if @tagger_morpheme_set.keys.include?(character.tagger_name)
+      @tagger_morpheme_set[character.tagger_name].push(morpheme)
     else
-      @result[result[:tagger]] = Array.new.push(result)
+      @tagger_morpheme_set[character.tagger_name] = Array.new.push(morpheme)
     end
   end
 
-  def dump
-    check_pos
-    @dump_results.each do |taggers|
-      taggers.each do |tagger|
-        puts "[#{tagger.to_s}]"
-      end
-      @result[taggers.first].each do |result|
-        puts "#{result[:surface]}\t#{result[:feature]}"
-      end
-    end
-    puts "=== chunked ======================================"
-  end
-
-  def clear
-    @result = Hash.new
-    @dump_map = Hash.new
-    @dump_results = Array.new
-  end
-
-  private
   def check_pos
-    taggers = @result.keys
-    taggers.each_with_index do |tagger, index|
-      @dump_map[tagger] = index
-    end
-    @dump_results = taggers.map{|tagger| Array.new.push(tagger)}
-    (taggers.size - 1).times do
-      tagger01 = taggers.shift
-      taggers.each do |tagger02|
-        combination = [tagger01, tagger02].map{|tagger| @result[tagger].first[:grammar]}
-        if combination.uniq.size == 1
-          feature01 = @result[tagger01].map{|result| result[:feature]}.join("/")
-          feature02 = @result[tagger02].map{|result| result[:feature]}.join("/")
-          if feature01 == feature02 && @dump_map[tagger01] != @dump_map[tagger02]
-            @dump_results[@dump_map[tagger01]].concat(@dump_results[@dump_map[tagger02]])
-            @dump_results.delete_at(@dump_map[tagger02])
-            @dump_results.each_with_index do |results, index|
-              results.each do |result|
-                @dump_map[result] = index
-              end
-            end
-          end
+    @tagger_morpheme_set.keys.combination(2).each do |tagger_pair|
+      if @@tagger_pairs.include?(tagger_pair.reverse)
+        tagger_pair.reverse!
+      elsif ! @@tagger_pairs.include?(tagger_pair)
+        raise NotSupportedTaggerPairError.new("error: not supported tagger pair.")
+      end
+      feature_pair = tagger_pair.map{|tagger| @tagger_morpheme_set[tagger].map{|morpheme| morpheme.feature}.join("/")}
+      if same_grammar?(tagger_pair)
+        if feature_pair.uniq.size == 1
+          set_same_grammar(tagger_pair)
         else
-          @configs.each do |config|
-            if config[:combination] == combination
-              feature01 = @result[tagger01].map{|result| result[:feature]}.join("/")
-              feature02 = @result[tagger02].map{|result| result[:feature]}.join("/")
-              if config[:pattern].keys.include?(feature01) && config[:pattern][feature01].include?(feature02) && @dump_map[tagger01] != @dump_map[tagger02]
-                @dump_results[@dump_map[tagger01]].concat(@dump_results[@dump_map[tagger02]])
-                @dump_results.delete_at(@dump_map[tagger02])
-                @dump_results.each_with_index do |results, index|
-                  results.each do |result|
-                    @dump_map[result] = index
-                  end
-                end
-              end
-            elsif config[:combination] == combination.reverse
-              feature01 = @result[tagger02].map{|result| result[:feature]}.join("/")
-              feature02 = @result[tagger01].map{|result| result[:feature]}.join("/")
-              if config[:pattern].keys.include?(feature01) && config[:pattern][feature01].include?(feature02) && @dump_map[tagger01] != @dump_map[tagger02]
-                @dump_results[@dump_map[tagger01]].concat(@dump_results[@dump_map[tagger02]])
-                @dump_results.delete_at(@dump_map[tagger02])
-                @dump_results.each_with_index do |results, index|
-                  results.each do |result|
-                    @dump_map[result] = index
-                  end
-                end
-              end
-            else
-              next
-            end
-          end
+          set_different_grammar(tagger_pair)
+        end
+      else
+        pos_rule = @@tagger_rule_set[tagger_pair.join("_").intern]
+        if pos_rule.keys.include?(feature_pair[0]) && pos_rules[feature_pair[0]].include?(feature_pair[1])
+          set_same_grammar(tagger_pair)
+        else
+          set_different_grammar(tagger_pair)
         end
       end
     end
   end
-end
 
-class MorphDiff::Character
-  def initialize
-    @results = Array.new
+  def dump_data
+    output_text =
+      if acceptable?
+        "[acceptable]\n\n"
+      else
+        "[differences have been found]\n\n"
+      end
+    @tagger_sets.each do |tagger_set|
+      output_text += ">> #{tagger_set.join(", ")}\n"
+      tagger_set.each do |tagger|
+        morpheme = @tagger_morpheme_set[tagger]
+        output_text += "#{morpheme.surface}\t#{morpheme.feature}\n\n"
+      end
+    end
+    output_text
   end
 
-  def input(result)
-    @results.push(result)
+  private
+  def all_chunked?(characters)
+    characters.map{|character| charactar.chunked?}.inject{|result, item| result && item}
   end
 
-  def results_chunked
-    @results.select{|result| result[:chunked]}
+  def same_grammar?(tagger_pair)
+    tagger_pair.map{|tagger| @tagger_morpheme_set[tagger].first.grammar}.uniq.size == 1
   end
 
-  def all_chunked?
-    if @results.map{|result| result[:chunked]}.inject{|result, value| result && value}
-      return true
-    else
-      return false
+  def set_same_tagger(tagger_pair)
+    pos0 = @tagger_sets.index{|set| set.include?(tagger_pair[0])}
+    pos1 = @tagger_sets.index{|set| set.include?(tagger_pair[1])}
+    if pos0 && pos1 && pos0 != pos1
+      @tagger_sets[pos0] += @tagger_sets[pos1]
+    elsif pos0 && ! pos1
+      @tagger_sets[pos0].push(tagger_pair[1])
+    elsif ! pos0 && pos1
+      @tagger_sets[pos1].push(tagger_pair[0])
+    elsif ! pos0 && ! pos1
+      @tagger_sets.push(tagger_pair)
     end
   end
+
+  def set_different_tagger(tagger_pair)
+    if ! @tagger_sets.index{|set| set.include?(tagger_pair[0])}
+      @tagger_sets.push([tagger_pair[0]])
+    end
+    if ! @tagger_sets.index{|set| set.include?(tagger_pair[1])}
+      @tagger_sets.push([tagger_pair[1]])
+    end
+  end
+
+  def acceptable?
+    @tagger_sets.size == 1
+  end
+end
+
+class MorphDiff::MultiTagger::Token::Morpheme
+  def initialize(surface, feature, grammar)
+    @surface = surface
+    @feature = feature
+    @grammar = grammar
+  end
+  attr_reader :surface, :feature, :grammar
 end
