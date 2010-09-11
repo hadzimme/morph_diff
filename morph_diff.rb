@@ -2,7 +2,6 @@
 
 require "iconv"
 require "yaml"
-require "yaml/encoding"
 
 class String
   def is_binary_data?
@@ -25,6 +24,7 @@ class MorphDiff
       output_text += token.dump_data
       output_text += "=== chunked ======================================\n\n"
     end
+    return output_text
   end
 end
 
@@ -45,12 +45,12 @@ class MorphDiff::MultiTagger
           sub_characters = morpheme[0].split(//).map do |character|
             Character.new(tagger.name, tagger.grammar, *morpheme)
           end
-          sub_characters.last.mark_as_chunk
+          sub_characters.last.mark_as_chunked
           sub_characters
         end
         characters.flatten
       end
-    Token.tokenize(character_matrix.transpose)
+    return Token.tokenize(character_matrix.transpose)
   end
 end
 
@@ -61,13 +61,13 @@ class MorphDiff::MultiTagger::Tagger
     @pattern = configuration[:pattern]
     option = configuration[:option] || ""
     @tagger =
-      case tagger
+      case configuration[:tagger]
       when :mecab
         MeCab.new(option)
       when :juman
         JUMAN.new(option)
       else
-        raise NotSupportedTaggerError.new("not supported tagger")
+        raise NotSupportedTaggerError.new("error: not supported tagger")
       end
   end
   attr_reader :name, :grammar, :pattern
@@ -77,6 +77,9 @@ class MorphDiff::MultiTagger::Tagger
   end
 end
 
+class MorphDiff::MultiTagger::Tagger::NotSupportedTaggerError < StandardError
+end
+
 class MorphDiff::MultiTagger::Tagger::MeCab
   def initialize(option)
     require "MeCab"
@@ -84,7 +87,7 @@ class MorphDiff::MultiTagger::Tagger::MeCab
   end
 
   def parse(string)
-    @tagger.parse(string)
+    @tagger.parse(string).force_encoding("utf-8")
   end
 end
 
@@ -126,24 +129,28 @@ end
 
 class MorphDiff::MultiTagger::Token
   def self.preset_grammar(grammar_combinations)
-    @@tagger_pairs = Array.new
+    @@grammar_pairs = Array.new
     @@tagger_rule_set = Hash.new
     grammar_combinations.each do |grammar|
-      @@tagger_pairs.push(grammar[:combination])
+      @@grammar_pairs.push(grammar[:combination])
       rule = YAML.load_file(grammar[:config])
       @@tagger_rule_set[grammar[:combination].join("_").intern] = rule
     end
   end
 
-  def self.tokenize(characters)
+  def self.tokenize(character_matrix)
     tokens = Array.new.push(self.new)
-    characters.select{|character| character.chunked?}.each do |character|
-      tokens.last.input(character)
+    character_matrix.each do |row|
+      row.select{|character| character.chunked?}.each do |character|
+        tokens.last.input(character)
+      end
+      if row.map{|character| character.chunked?}.inject{|result, item| result && item}
+        tokens.last.check_pos
+        tokens.push(self.new)
+      end
     end
-    if all_chunked?(characters)
-      tokens.last.check_pos
-      tokens.push(self.new)
-    end
+    tokens.pop
+    return tokens
   end
 
   def initialize
@@ -152,7 +159,7 @@ class MorphDiff::MultiTagger::Token
   end
 
   def input(character)
-    morpheme = Morpheme.new(character.surface, character.feature)
+    morpheme = Morpheme.new(character.surface, character.feature, character.grammar)
     if @tagger_morpheme_set.keys.include?(character.tagger_name)
       @tagger_morpheme_set[character.tagger_name].push(morpheme)
     else
@@ -162,24 +169,25 @@ class MorphDiff::MultiTagger::Token
 
   def check_pos
     @tagger_morpheme_set.keys.combination(2).each do |tagger_pair|
-      if @@tagger_pairs.include?(tagger_pair.reverse)
-        tagger_pair.reverse!
-      elsif ! @@tagger_pairs.include?(tagger_pair)
-        raise NotSupportedTaggerPairError.new("error: not supported tagger pair.")
-      end
+      grammar_pair = tagger_pair.map{|tagger| @tagger_morpheme_set[tagger].last.grammar}
       feature_pair = tagger_pair.map{|tagger| @tagger_morpheme_set[tagger].map{|morpheme| morpheme.feature}.join("/")}
-      if same_grammar?(tagger_pair)
+      if grammar_pair.uniq.size == 1
         if feature_pair.uniq.size == 1
-          set_same_grammar(tagger_pair)
+          set_same_tagger(tagger_pair)
         else
-          set_different_grammar(tagger_pair)
+          set_different_tagger(tagger_pair)
         end
       else
-        pos_rule = @@tagger_rule_set[tagger_pair.join("_").intern]
-        if pos_rule.keys.include?(feature_pair[0]) && pos_rules[feature_pair[0]].include?(feature_pair[1])
-          set_same_grammar(tagger_pair)
+        if @@grammar_pairs.include?(grammar_pair.reverse)
+          grammar_pair.reverse!
+        elsif ! @@grammar_pairs.include?(grammar_pair)
+          raise NotSupportedGrammarPairError.new("error: not supported grammar pair.")
+        end
+        pos_rule = @@tagger_rule_set[grammar_pair.join("_").intern]
+        if pos_rule.keys.include?(feature_pair[0]) && pos_rule[feature_pair[0]].include?(feature_pair[1])
+          set_same_tagger(tagger_pair)
         else
-          set_different_grammar(tagger_pair)
+          set_different_tagger(tagger_pair)
         end
       end
     end
@@ -195,27 +203,23 @@ class MorphDiff::MultiTagger::Token
     @tagger_sets.each do |tagger_set|
       output_text += ">> #{tagger_set.join(", ")}\n"
       tagger_set.each do |tagger|
-        morpheme = @tagger_morpheme_set[tagger]
-        output_text += "#{morpheme.surface}\t#{morpheme.feature}\n\n"
+        morphemes = @tagger_morpheme_set[tagger]
+        morphemes.each do |morpheme|
+          output_text += "#{morpheme.surface}\t#{morpheme.feature}\n"
+        end
       end
+      output_text += "\n"
     end
-    output_text
+    return output_text
   end
 
   private
-  def all_chunked?(characters)
-    characters.map{|character| charactar.chunked?}.inject{|result, item| result && item}
-  end
-
-  def same_grammar?(tagger_pair)
-    tagger_pair.map{|tagger| @tagger_morpheme_set[tagger].first.grammar}.uniq.size == 1
-  end
-
   def set_same_tagger(tagger_pair)
     pos0 = @tagger_sets.index{|set| set.include?(tagger_pair[0])}
     pos1 = @tagger_sets.index{|set| set.include?(tagger_pair[1])}
     if pos0 && pos1 && pos0 != pos1
       @tagger_sets[pos0] += @tagger_sets[pos1]
+      @tagger_sets.delete_at(pos1)
     elsif pos0 && ! pos1
       @tagger_sets[pos0].push(tagger_pair[1])
     elsif ! pos0 && pos1
@@ -237,6 +241,9 @@ class MorphDiff::MultiTagger::Token
   def acceptable?
     @tagger_sets.size == 1
   end
+end
+
+class MorphDiff::MultiTagger::Token::NotSupportedGrammarPairError < StandardError
 end
 
 class MorphDiff::MultiTagger::Token::Morpheme

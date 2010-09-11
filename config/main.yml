@@ -16,14 +16,14 @@
     :description: JUMAN with default dictionary and autodic
   :mecab_unidic:
     :tagger: :mecab
-    :option: -d $HOME/usr/lib/mecab/dic/unidic
+    :option: -d /usr/lib/mecab/dic/unidic
     :grammar: :unidic
     :pattern: "^([^\t]+)\t([^,]+),([^,]+).+?\n"
     :encoding: utf-8
     :description: MeCab with UniDic
   :mecab_ipadic:
     :tagger: :mecab
-    :option: -d $HOME/usr/lib/mecab/dic/ipadic
+    :option: -d /usr/lib/mecab/dic/ipadic
     :grammar: :ipadic
     :pattern: "^([^\t]+)\t([^,]+),([^,]+).+?\n"
     :encoding: utf-8
