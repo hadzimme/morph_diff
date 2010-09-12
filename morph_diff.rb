@@ -12,6 +12,7 @@ end
 class MorphDiff
   def initialize
     @multi_tagger = MultiTagger.new
+    @tokens = Array.new
   end
 
   def compare(string)
@@ -33,7 +34,7 @@ class MorphDiff::MultiTagger
     main_configuration = YAML.load_file("config/main.yml")
     tagger_configuration = main_configuration[:tagger_configuration]
     @taggers = tagger_configuration.map{|name, configuration| Tagger.new(name, configuration)}
-    Token.preset_grammar(main_configuration[:grammar_pairs])
+    Token.preset(main_configuration[:grammar_pairs])
   end
 
   def parse(string)
@@ -77,9 +78,6 @@ class MorphDiff::MultiTagger::Tagger
   end
 end
 
-class MorphDiff::MultiTagger::Tagger::NotSupportedTaggerError < StandardError
-end
-
 class MorphDiff::MultiTagger::Tagger::MeCab
   def initialize(option)
     require "MeCab"
@@ -101,6 +99,9 @@ class MorphDiff::MultiTagger::Tagger::JUMAN
     result = %x{echo #{string} | juman #{@option}}
     Iconv.conv("utf-8", "euc-jp", result)
   end
+end
+
+class MorphDiff::MultiTagger::Tagger::NotSupportedTaggerError < StandardError
 end
 
 class MorphDiff::MultiTagger::Character
@@ -128,7 +129,7 @@ class MorphDiff::MultiTagger::Character
 end
 
 class MorphDiff::MultiTagger::Token
-  def self.preset_grammar(grammar_combinations)
+  def self.preset(grammar_combinations)
     @@grammar_pairs = Array.new
     @@tagger_rule_set = Hash.new
     grammar_combinations.each do |grammar|
@@ -243,9 +244,6 @@ class MorphDiff::MultiTagger::Token
   end
 end
 
-class MorphDiff::MultiTagger::Token::NotSupportedGrammarPairError < StandardError
-end
-
 class MorphDiff::MultiTagger::Token::Morpheme
   def initialize(surface, feature, grammar)
     @surface = surface
@@ -253,4 +251,7 @@ class MorphDiff::MultiTagger::Token::Morpheme
     @grammar = grammar
   end
   attr_reader :surface, :feature, :grammar
+end
+
+class MorphDiff::MultiTagger::Token::NotSupportedGrammarPairError < StandardError
 end
